@@ -9,7 +9,9 @@ from services import (
     store_text,
 )
 
-process_pool = ProcessPoolExecutor(max_workers=3)
+process_pool = ProcessPoolExecutor(max_workers=8)
+
+extraction_limit = asyncio.Semaphore(3)
 
 async def process_document(document_id: str) -> None:
     loop = asyncio.get_running_loop()
@@ -25,15 +27,14 @@ async def process_document(document_id: str) -> None:
     )
     try:
         async with asyncio.timeout(10):
-            extracted = await loop.run_in_executor(
-                process_pool,
-                extract_text,
-                document
-            )
+            async with extraction_limit:
+                extracted = await loop.run_in_executor(
+                    process_pool,
+                    extract_text,
+                    document
+                )
 
             await store_text(document_id, extracted)
-    except asyncio.TimeoutError:
-        print("Timed out")
 
     finally:
         await backup
