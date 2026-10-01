@@ -23,12 +23,17 @@ async def process_document(document_id: str) -> None:
             document
         )
     )
+    try:
+        async with asyncio.timeout(10):
+            extracted = await loop.run_in_executor(
+                process_pool,
+                extract_text,
+                document
+            )
 
-    extracted = await loop.run_in_executor(
-        process_pool,
-        extract_text,
-        document
-    )
+            await store_text(document_id, extracted)
+    except asyncio.TimeoutError:
+        print("Timed out")
 
-    await store_text(document_id, extracted)
-    await backup
+    finally:
+        await backup
