@@ -1,6 +1,6 @@
 # pipeline.py
 import asyncio
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from services import (
     download_document,
@@ -38,3 +38,26 @@ async def process_document(document_id: str) -> None:
 
     finally:
         await backup
+
+async def process_batch(document_ids: list[str]) -> dict[str, str]:
+    tasks = {}
+
+    for document_id in document_ids:
+        task = asyncio.create_task(
+            process_document(document_id)
+        )
+
+        tasks[task] = document_id
+
+    results = {}
+
+    async for completed_task in asyncio.as_completed(tasks):
+        document_id = tasks[completed_task]
+
+        try:
+            await completed_task
+            results[document_id] = "success"
+        except Exception:
+            results[document_id] = "failed"
+
+    return results
