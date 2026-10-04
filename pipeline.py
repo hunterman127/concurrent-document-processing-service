@@ -1,6 +1,6 @@
 # pipeline.py
 import asyncio
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor
 import logging
 
 from services import (
@@ -10,13 +10,17 @@ from services import (
     store_text,
 )
 
+from config import (
+    EXTRACTION_TIMEOUT,
+    EXTRACTION_CONCURRENCY,
+    PROCESS_POOL_WORKERS,
+)
+
 logger = logging.getLogger(__name__)
 
-EXTRACTION_TIMEOUT = 10
+process_pool = ProcessPoolExecutor(max_workers=PROCESS_POOL_WORKERS)
 
-process_pool = ProcessPoolExecutor(max_workers=8)
-
-extraction_limit = asyncio.Semaphore(3)
+extraction_limit = asyncio.Semaphore(EXTRACTION_CONCURRENCY)
 
 async def cleanup_extraction(cpu_future):
     try:
@@ -30,7 +34,7 @@ async def process_document(document_id: str) -> None:
     document = await download_document(document_id)
     logger.info("Download completed for document %s", document_id)
 
-    logger.info("Backup started for document doc%s", document_id)
+    logger.info("Backup started for document %s", document_id)
     backup = asyncio.create_task(
         asyncio.to_thread(
             save_original,
@@ -75,9 +79,6 @@ async def process_document(document_id: str) -> None:
                         document_id
                     )
 
-                    raise
-
-                except Exception:
                     raise
 
             finally:
@@ -137,7 +138,3 @@ async def process_batch(document_ids: list[str]) -> dict[str, str]:
             results[document_id] = "failed"
 
     return results
-
-def process():
-    logger.info("Processing started")
-    logger.error("Processing failed")
