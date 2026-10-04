@@ -9,9 +9,17 @@ from services import (
     store_text,
 )
 
+EXTRACTION_TIMEOUT = 10
+
 process_pool = ProcessPoolExecutor(max_workers=8)
 
 extraction_limit = asyncio.Semaphore(3)
+
+async def cleanup_extraction(cpu_future):
+    try:
+        await asyncio.shield(cpu_future)
+    finally:
+        extraction_limit.release()
 
 async def process_document(document_id: str) -> None:
     loop = asyncio.get_running_loop()
@@ -26,16 +34,30 @@ async def process_document(document_id: str) -> None:
         )
     )
     try:
-        async with asyncio.timeout(10):
-            async with extraction_limit:
-                extracted = await loop.run_in_executor(
-                    process_pool,
-                    extract_text,
-                    document
+        async with asyncio.timeout(EXTRACTION_TIMEOUT):
+            await extraction_limit.acquire()
+            cpu_future = loop.run_in_executor(
+                process_pool,
+                extract_text,
+                document
+            )
+
+            try:
+                extracted = await asyncio.shield(cpu_future)
+                extraction_limit.release()
+
+
+            except asyncio.CancelledError:
+                asyncio.create_task(
+                    cleanup_extraction(cpu_future)
                 )
+                raise
+
+            except Exception:
+                extraction_limit.release()
+                raise
 
             await store_text(document_id, extracted)
-
     finally:
         await backup
 
