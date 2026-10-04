@@ -161,3 +161,45 @@ async def test_timeout(monkeypatch):
     test_semaphore.release()
     thread_pool.shutdown()
 
+
+@pytest.mark.asyncio
+async def test_executor_failure_releases_semaphore(monkeypatch, caplog):
+    test_semaphore = asyncio.Semaphore(1)
+    broken_executor = ThreadPoolExecutor(max_workers=1)
+    broken_executor.shutdown()
+
+    monkeypatch.setattr(
+        pipeline,
+        "process_pool",
+        broken_executor
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "download_document",
+        fake_download_document
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "save_original",
+        fake_original
+    )
+
+    monkeypatch.setattr(
+        pipeline,
+        "extraction_limit",
+        test_semaphore
+    )
+
+    with pytest.raises(RuntimeError):
+        await pipeline.process_document("doc1")
+
+    await asyncio.wait_for(
+        test_semaphore.acquire(),
+        timeout=.01
+    )
+
+    test_semaphore.release()
+
+    assert "Extraction failed for document doc1" in caplog.text

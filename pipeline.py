@@ -1,6 +1,7 @@
 # pipeline.py
 import asyncio
 from concurrent.futures import ProcessPoolExecutor, as_completed
+import logging
 
 from services import (
     download_document,
@@ -8,6 +9,8 @@ from services import (
     extract_text,
     store_text,
 )
+
+logger = logging.getLogger(__name__)
 
 EXTRACTION_TIMEOUT = 10
 
@@ -23,43 +26,93 @@ async def cleanup_extraction(cpu_future):
 
 async def process_document(document_id: str) -> None:
     loop = asyncio.get_running_loop()
-
+    logger.info("Download started for document %s", document_id)
     document = await download_document(document_id)
+    logger.info("Download completed for document %s", document_id)
 
-
+    logger.info("Backup started for document doc%s", document_id)
     backup = asyncio.create_task(
         asyncio.to_thread(
             save_original,
             document
         )
     )
+
     try:
         async with asyncio.timeout(EXTRACTION_TIMEOUT):
             await extraction_limit.acquire()
-            cpu_future = loop.run_in_executor(
-                process_pool,
-                extract_text,
-                document
+            release_here = True
+
+            logger.info(
+                "Extraction started for document %s",
+                document_id
             )
 
             try:
-                extracted = await asyncio.shield(cpu_future)
-                extraction_limit.release()
-
-
-            except asyncio.CancelledError:
-                asyncio.create_task(
-                    cleanup_extraction(cpu_future)
+                cpu_future = loop.run_in_executor(
+                    process_pool,
+                    extract_text,
+                    document
                 )
-                raise
+
+                try:
+                    extracted = await asyncio.shield(cpu_future)
+
+                    logger.info(
+                        "Extraction completed for document %s",
+                        document_id
+                    )
+
+                except asyncio.CancelledError:
+                    asyncio.create_task(
+                        cleanup_extraction(cpu_future)
+                    )
+
+                    release_here = False
+
+                    logger.warning(
+                        "Extraction interrupted for document %s; cleanup scheduled",
+                        document_id
+                    )
+
+                    raise
+
+                except Exception:
+                    raise
+
+            finally:
+                if release_here:
+                    extraction_limit.release()
+
+            try:
+                logger.info("Storage started for document %s", document_id)
+
+                await store_text(document_id, extracted)
+
+                logger.info("Storage completed for document %s", document_id)
 
             except Exception:
-                extraction_limit.release()
+                logger.exception("Storage failed for document %s", document_id)
                 raise
 
-            await store_text(document_id, extracted)
+    except TimeoutError:
+        logger.error("Processing timed out for document %s", document_id)
+        raise
+
+    except Exception:
+        logger.exception(
+            "Extraction failed for document %s",
+            document_id
+        )
+        raise
+
     finally:
-        await backup
+        try:
+            await backup
+            logger.info("Backup completed for document %s", document_id)
+        except Exception:
+            logger.exception("Backup failed for document %s", document_id)
+            raise
 
 async def process_batch(document_ids: list[str]) -> dict[str, str]:
     tasks = {}
@@ -80,6 +133,11 @@ async def process_batch(document_ids: list[str]) -> dict[str, str]:
             await completed_task
             results[document_id] = "success"
         except Exception:
+            logger.exception("%s failed", document_id)
             results[document_id] = "failed"
 
     return results
+
+def process():
+    logger.info("Processing started")
+    logger.error("Processing failed")
