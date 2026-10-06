@@ -10,6 +10,8 @@ from services import (
     store_text,
 )
 
+from database import create_job, update_job_status
+
 from config import (
     EXTRACTION_TIMEOUT,
     EXTRACTION_CONCURRENCY,
@@ -29,91 +31,100 @@ async def cleanup_extraction(cpu_future):
         extraction_limit.release()
 
 async def process_document(document_id: str) -> None:
-    loop = asyncio.get_running_loop()
-    logger.info("Download started for document %s", document_id)
-    document = await download_document(document_id)
-    logger.info("Download completed for document %s", document_id)
-
-    logger.info("Backup started for document %s", document_id)
-    backup = asyncio.create_task(
-        asyncio.to_thread(
-            save_original,
-            document
-        )
-    )
-
+    job_id = create_job(document_id)
+    
     try:
-        async with asyncio.timeout(EXTRACTION_TIMEOUT):
-            await extraction_limit.acquire()
-            release_here = True
+        loop = asyncio.get_running_loop()
+        logger.info("Download started for document %s", document_id)
+        document = await download_document(document_id)
+        logger.info("Download completed for document %s", document_id)
 
-            logger.info(
-                "Extraction started for document %s",
-                document_id
+        logger.info("Backup started for document %s", document_id)
+        backup = asyncio.create_task(
+            asyncio.to_thread(
+                save_original,
+                document
             )
+        )
 
-            try:
-                cpu_future = loop.run_in_executor(
-                    process_pool,
-                    extract_text,
-                    document
+        try:
+            async with asyncio.timeout(EXTRACTION_TIMEOUT):
+                await extraction_limit.acquire()
+                release_here = True
+
+                logger.info(
+                    "Extraction started for document %s",
+                    document_id
                 )
 
                 try:
-                    extracted = await asyncio.shield(cpu_future)
-
-                    logger.info(
-                        "Extraction completed for document %s",
-                        document_id
+                    cpu_future = loop.run_in_executor(
+                        process_pool,
+                        extract_text,
+                        document
                     )
 
-                except asyncio.CancelledError:
-                    asyncio.create_task(
-                        cleanup_extraction(cpu_future)
-                    )
+                    try:
+                        extracted = await asyncio.shield(cpu_future)
 
-                    release_here = False
+                        logger.info(
+                            "Extraction completed for document %s",
+                            document_id
+                        )
 
-                    logger.warning(
-                        "Extraction interrupted for document %s; cleanup scheduled",
-                        document_id
-                    )
+                    except asyncio.CancelledError:
+                        asyncio.create_task(
+                            cleanup_extraction(cpu_future)
+                        )
 
+                        release_here = False
+
+                        logger.warning(
+                            "Extraction interrupted for document %s; cleanup scheduled",
+                            document_id
+                        )
+
+                        raise
+
+                finally:
+                    if release_here:
+                        extraction_limit.release()
+
+                try:
+                    logger.info("Storage started for document %s", document_id)
+
+                    await store_text(document_id, extracted)
+
+                    logger.info("Storage completed for document %s", document_id)
+
+                except Exception:
+                    logger.exception("Storage failed for document %s", document_id)
                     raise
 
-            finally:
-                if release_here:
-                    extraction_limit.release()
-
-            try:
-                logger.info("Storage started for document %s", document_id)
-
-                await store_text(document_id, extracted)
-
-                logger.info("Storage completed for document %s", document_id)
-
-            except Exception:
-                logger.exception("Storage failed for document %s", document_id)
-                raise
-
-    except TimeoutError:
-        logger.error("Processing timed out for document %s", document_id)
-        raise
-
-    except Exception:
-        logger.exception(
-            "Extraction failed for document %s",
-            document_id
-        )
-        raise
-
-    finally:
-        try:
-            await backup
-            logger.info("Backup completed for document %s", document_id)
-        except Exception:
-            logger.exception("Backup failed for document %s", document_id)
+        except TimeoutError:
+            logger.error("Processing timed out for document %s", document_id)
             raise
+
+        except Exception:
+            logger.exception(
+                "Extraction failed for document %s",
+                document_id
+            )
+            raise
+
+        finally:
+            try:
+                await backup
+                logger.info("Backup completed for document %s", document_id)
+            except Exception:
+                logger.exception("Backup failed for document %s", document_id)
+                raise
+    except Exception:
+        update_job_status(job_id, "failed")
+        raise
+    else:
+        update_job_status(job_id, "success")
+        
 
 async def process_batch(document_ids: list[str]) -> dict[str, str]:
     tasks = {}
