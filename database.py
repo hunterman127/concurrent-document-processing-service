@@ -1,8 +1,10 @@
 import sqlite3
 from datetime import datetime, timezone
 
+DB_PATH = "documents.db"
+
 def init_db():
-    connection = sqlite3.connect("documents.db")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS jobs(
@@ -16,7 +18,7 @@ def init_db():
     connection.close()
 
 def create_job(document_id: str):
-    connection = sqlite3.connect("documents.db")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
     timestamp = datetime.now(timezone.utc).isoformat()
     cursor.execute(
@@ -31,7 +33,7 @@ def create_job(document_id: str):
     return row_id
 
 def update_job_status(job_id: int, status: str):
-    connection = sqlite3.connect("documents.db")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
 
     cursor.execute("""
@@ -42,9 +44,9 @@ def update_job_status(job_id: int, status: str):
     connection.close()
 
 def get_job(job_id: int):
-    connection = sqlite3.connect("documents.db")
+    connection = sqlite3.connect(DB_PATH)
     cursor = connection.cursor()
     cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
-    row_id = cursor.fetchone()
+    row = cursor.fetchone()
     connection.close()
-    return row_id
+    return row

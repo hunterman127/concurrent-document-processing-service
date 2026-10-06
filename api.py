@@ -1,6 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from pipeline import process_document
+from database import get_job
 
 app = FastAPI()
 
@@ -37,4 +38,22 @@ async def post_request(request: ProcessDocumentRequest):
                 "document_id": request.document_id,
                 "status": "success"
                 }
-    
+
+@app.get("/jobs/{job_id}")
+async def get_job_status(job_id: int):
+    job = get_job(job_id)
+
+    if job is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Job not found"
+        )
+
+    job_info = {
+        "job_id": job[0],
+        "document_id": job[1],
+        "status": job[2],
+        "created_at": job[3]
+    }
+
+    return job_info
