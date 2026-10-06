@@ -1,8 +1,7 @@
 import sqlite3
 from datetime import datetime, timezone
 from contextlib import closing
-
-DB_PATH = "documents.db"
+from config import DB_PATH
 
 def init_db():
     with closing(sqlite3.connect(DB_PATH)) as connection:

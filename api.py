@@ -1,9 +1,17 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from pipeline import process_document
-from database import get_job
 
-app = FastAPI()
+from pipeline import process_document
+from database import get_job, init_db
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    yield
+
+app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def status():
