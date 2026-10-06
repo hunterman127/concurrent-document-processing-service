@@ -1,52 +1,58 @@
 import sqlite3
 from datetime import datetime, timezone
+from contextlib import closing
 
 DB_PATH = "documents.db"
 
 def init_db():
-    connection = sqlite3.connect(DB_PATH)
-    cursor = connection.cursor()
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS jobs(
-            job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            document_id TEXT NOT NULL,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-""")
-    connection.commit()
-    connection.close()
+    with closing(sqlite3.connect(DB_PATH)) as connection:
+        with connection:
+            cursor = connection.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS jobs(
+                    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    document_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+            """)
 
 def create_job(document_id: str):
-    connection = sqlite3.connect(DB_PATH)
-    cursor = connection.cursor()
-    timestamp = datetime.now(timezone.utc).isoformat()
-    cursor.execute(
-        """
-        INSERT INTO jobs (document_id, status, created_at) VALUES (?,?,?)
-        """,
-        (document_id, "processing",timestamp)
-    )
-    row_id = cursor.lastrowid
-    connection.commit()
-    connection.close()
+    with closing(sqlite3.connect(DB_PATH)) as connection:
+        with connection:
+            cursor = connection.cursor()
+            timestamp = datetime.now(timezone.utc).isoformat()
+            cursor.execute(
+                """
+                INSERT INTO jobs (document_id, status, created_at) VALUES (?,?,?)
+                """,
+                (document_id, "processing",timestamp)
+            )
+            row_id = cursor.lastrowid
+
     return row_id
 
 def update_job_status(job_id: int, status: str):
-    connection = sqlite3.connect(DB_PATH)
-    cursor = connection.cursor()
+    with closing(sqlite3.connect(DB_PATH)) as connection:
+        with connection:
+        
+            cursor = connection.cursor()
 
-    cursor.execute("""
-        UPDATE jobs SET status = ? WHERE job_id = ?
-""", (status, job_id))
-
-    connection.commit()
-    connection.close()
+            cursor.execute(
+                """
+                UPDATE jobs 
+                SET status = ? 
+                WHERE job_id = ?
+                """, 
+                (status, job_id)
+            )
 
 def get_job(job_id: int):
-    connection = sqlite3.connect(DB_PATH)
-    cursor = connection.cursor()
-    cursor.execute("SELECT * FROM jobs WHERE job_id = ?", (job_id,))
-    row = cursor.fetchone()
-    connection.close()
+    with closing(sqlite3.connect(DB_PATH)) as connection:
+        cursor = connection.cursor()
+        cursor.execute(
+            "SELECT * FROM jobs WHERE job_id = ?", 
+            (job_id,)
+        )
+        row = cursor.fetchone()
     return row
